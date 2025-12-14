@@ -20,6 +20,22 @@ def parse_args():
     argparser = argparse.ArgumentParser()
 
     argparser.add_argument(
+        "--gui",
+        required=False,
+        dest="gui",
+        action="store_true",
+        help="Launch the desktop GUI.",
+    )
+
+    argparser.add_argument(
+        "--cli",
+        required=False,
+        dest="cli",
+        action="store_true",
+        help="Run the command-line interface.",
+    )
+
+    argparser.add_argument(
         "-i",
         "--inputDir",
         default=["inputs"],
@@ -94,6 +110,25 @@ def entry_point_for_args(args):
         )
 
 
+def launch_gui() -> None:
+    try:
+        from omr_gui.app import main as gui_main
+    except Exception as exc:  # pragma: no cover - depends on GUI deps/runtime
+        logger.error("Failed to launch GUI:", exc)
+        logger.error(
+            "Tip: install GUI dependencies (e.g. `pip install -r requirements.txt`) and run from the repo root."
+        )
+        raise SystemExit(1) from exc
+
+    gui_main()
+
+
 if __name__ == "__main__":
-    args = parse_args()
-    entry_point_for_args(args)
+    if "--gui" in sys.argv or (len(sys.argv) == 1 and "--cli" not in sys.argv):
+        launch_gui()
+    else:
+        args = parse_args()
+        if args.get("gui"):
+            launch_gui()
+        else:
+            entry_point_for_args(args)

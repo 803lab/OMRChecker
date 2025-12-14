@@ -1,4 +1,5 @@
 import os
+from itertools import combinations
 
 import cv2
 import numpy as np
@@ -41,6 +42,12 @@ class CropOnMarkers(ImagePreprocessor):
         )
         self.marker_rescale_steps = int(marker_ops.get("marker_rescale_steps", 10))
         self.apply_erode_subtract = marker_ops.get("apply_erode_subtract", True)
+        self.search_mode = str(
+            marker_ops.get(
+                "searchMode",
+                "global" if marker_ops.get("globalSearch") else "quadrants",
+            )
+        ).lower()
         self.marker = self.load_marker(marker_ops, config)
 
     def __str__(self):
@@ -48,6 +55,61 @@ class CropOnMarkers(ImagePreprocessor):
 
     def exclude_files(self):
         return [self.marker_path]
+
+    def _get_centres_global(self, image_eroded_sub, optimal_marker, file_path):
+        config = self.tuning_config
+        _h, w = optimal_marker.shape[:2]
+        res = cv2.matchTemplate(image_eroded_sub, optimal_marker, cv2.TM_CCOEFF_NORMED)
+
+        res_work = res.copy()
+        candidates = []
+        suppress_x = max(1, int(w * 0.9))
+        suppress_y = max(1, int(_h * 0.9))
+        max_candidates = 20
+        for _ in range(max_candidates):
+            _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(res_work)
+            if max_val < self.min_matching_threshold:
+                break
+            x, y = int(max_loc[0]), int(max_loc[1])
+            candidates.append((float(max_val), x, y))
+            x0 = max(0, x - suppress_x)
+            y0 = max(0, y - suppress_y)
+            x1 = min(res_work.shape[1] - 1, x + suppress_x)
+            y1 = min(res_work.shape[0] - 1, y + suppress_y)
+            res_work[y0 : y1 + 1, x0 : x1 + 1] = 0
+
+        if len(candidates) < 4:
+            logger.error(file_path, "\nError: Not enough markers found in global search.")
+            if config.outputs.show_image_level >= 1:
+                InteractionUtils.show(f"Marker search: {file_path}", image_eroded_sub, 0, config=config)
+                InteractionUtils.show("matchTemplate res", res, 1, config=config)
+            return None, None, None
+
+        top_k = candidates[: min(len(candidates), 12)]
+        best = None
+        best_area = None
+        best_score = None
+        for combo in combinations(top_k, 4):
+            centres = np.array(
+                [[x + w / 2, y + _h / 2] for (_t, x, y) in combo], dtype="float32"
+            )
+            area = float(
+                (centres[:, 0].max() - centres[:, 0].min())
+                * (centres[:, 1].max() - centres[:, 1].min())
+            )
+            score = float(sum(t for (t, _x, _y) in combo))
+            if best_area is None or area > best_area or (area == best_area and score > best_score):
+                best = combo
+                best_area = area
+                best_score = score
+
+        if best is None:
+            return None, None, None
+
+        centres = [[x + w / 2, y + _h / 2] for (_t, x, y) in best]
+        avg_t = float(sum(t for (t, _x, _y) in best) / 4)
+        rects = [(x, y, w, _h) for (_t, x, y) in best]
+        return centres, rects, avg_t
 
     def apply_filter(self, image, file_path):
         config = self.tuning_config
@@ -64,22 +126,24 @@ class CropOnMarkers(ImagePreprocessor):
                 )
             )
         )
-        # Quads on warped image
         quads = {}
-        h1, w1 = image_eroded_sub.shape[:2]
-        midh, midw = (
-            h1 // QUADRANT_DIVISION["height_factor"],
-            w1 // QUADRANT_DIVISION["width_factor"],
-        )
-        origins = [[0, 0], [midw, 0], [0, midh], [midw, midh]]
-        quads[0] = image_eroded_sub[0:midh, 0:midw]
-        quads[1] = image_eroded_sub[0:midh, midw:w1]
-        quads[2] = image_eroded_sub[midh:h1, 0:midw]
-        quads[3] = image_eroded_sub[midh:h1, midw:w1]
+        origins = [[0, 0], [0, 0], [0, 0], [0, 0]]
+        if self.search_mode not in {"global", "full", "all"}:
+            # Quads on warped image
+            h1, w1 = image_eroded_sub.shape[:2]
+            midh, midw = (
+                h1 // QUADRANT_DIVISION["height_factor"],
+                w1 // QUADRANT_DIVISION["width_factor"],
+            )
+            origins = [[0, 0], [midw, 0], [0, midh], [midw, midh]]
+            quads[0] = image_eroded_sub[0:midh, 0:midw]
+            quads[1] = image_eroded_sub[0:midh, midw:w1]
+            quads[2] = image_eroded_sub[midh:h1, 0:midw]
+            quads[3] = image_eroded_sub[midh:h1, midw:w1]
 
-        # Draw Quadlines
-        image_eroded_sub[:, midw : midw + 2] = DEFAULT_WHITE_COLOR
-        image_eroded_sub[midh : midh + 2, :] = DEFAULT_WHITE_COLOR
+            # Draw Quadlines (quadrant mode debugging)
+            image_eroded_sub[:, midw : midw + 2] = DEFAULT_WHITE_COLOR
+            image_eroded_sub[midh : midh + 2, :] = DEFAULT_WHITE_COLOR
 
         best_scale, all_max_t = self.getBestMatch(image_eroded_sub)
         if best_scale is None:
@@ -92,71 +156,95 @@ class CropOnMarkers(ImagePreprocessor):
         )
         _h, w = optimal_marker.shape[:2]
         centres = []
-        sum_t, max_t = 0, 0
-        quarter_match_log = "Matching Marker:  "
-        for k in range(0, 4):
-            res = cv2.matchTemplate(quads[k], optimal_marker, cv2.TM_CCOEFF_NORMED)
-            max_t = res.max()
-            quarter_match_log += f"Quarter{str(k + 1)}: {str(round(max_t, 3))}\t"
-            if (
-                max_t < self.min_matching_threshold
-                or abs(all_max_t - max_t) >= self.max_matching_variation
-            ):
-                logger.error(
-                    file_path,
-                    "\nError: No circle found in Quad",
-                    k + 1,
-                    "\n\t min_matching_threshold",
-                    self.min_matching_threshold,
-                    "\t max_matching_variation",
-                    self.max_matching_variation,
-                    "\t max_t",
-                    max_t,
-                    "\t all_max_t",
-                    all_max_t,
-                )
-                if config.outputs.show_image_level >= 1:
-                    InteractionUtils.show(
-                        f"No markers: {file_path}",
-                        image_eroded_sub,
-                        0,
-                        config=config,
-                    )
-                    InteractionUtils.show(
-                        f"res_Q{str(k + 1)} ({str(max_t)})",
-                        res,
-                        1,
-                        config=config,
-                    )
-                return None
+        rects = []
+        avg_t = 0.0
 
-            pt = np.argwhere(res == max_t)[0]
-            pt = [pt[1], pt[0]]
-            pt[0] += origins[k][0]
-            pt[1] += origins[k][1]
-            # print(">>",pt)
+        if self.search_mode in {"global", "full", "all"}:
+            centres, rects, avg_t = self._get_centres_global(
+                image_eroded_sub, optimal_marker, file_path
+            )
+            if centres is None:
+                return None
+        else:
+            sum_t, max_t = 0, 0
+            quarter_match_log = "Matching Marker:  "
+            for k in range(0, 4):
+                res = cv2.matchTemplate(quads[k], optimal_marker, cv2.TM_CCOEFF_NORMED)
+                max_t = res.max()
+                quarter_match_log += f"Quarter{str(k + 1)}: {str(round(max_t, 3))}\t"
+                if (
+                    max_t < self.min_matching_threshold
+                    or abs(all_max_t - max_t) >= self.max_matching_variation
+                ):
+                    if self.search_mode in {"auto", "fallback"}:
+                        centres, rects, avg_t = self._get_centres_global(
+                            image_eroded_sub, optimal_marker, file_path
+                        )
+                        if centres is None:
+                            return None
+                        break
+
+                    logger.error(
+                        file_path,
+                        "\nError: No circle found in Quad",
+                        k + 1,
+                        "\n\t min_matching_threshold",
+                        self.min_matching_threshold,
+                        "\t max_matching_variation",
+                        self.max_matching_variation,
+                        "\t max_t",
+                        max_t,
+                        "\t all_max_t",
+                        all_max_t,
+                    )
+                    if config.outputs.show_image_level >= 1:
+                        InteractionUtils.show(
+                            f"No markers: {file_path}",
+                            image_eroded_sub,
+                            0,
+                            config=config,
+                        )
+                        InteractionUtils.show(
+                            f"res_Q{str(k + 1)} ({str(max_t)})",
+                            res,
+                            1,
+                            config=config,
+                        )
+                    return None
+
+                pt = np.argwhere(res == max_t)[0]
+                pt = [pt[1], pt[0]]
+                pt[0] += origins[k][0]
+                pt[1] += origins[k][1]
+                rects.append((pt[0], pt[1], w, _h))
+                centres.append([pt[0] + w / 2, pt[1] + _h / 2])
+                sum_t += max_t
+
+            if centres and isinstance(centres[0], list):
+                logger.info(quarter_match_log)
+                logger.info(f"Optimal Scale: {best_scale}")
+                avg_t = float(sum_t / 4) if sum_t else 0.0
+
+        # analysis data
+        if avg_t:
+            self.threshold_circles.append(avg_t)
+
+        for (x, y, rw, rh) in rects:
+            pt = (int(x), int(y))
             image = cv2.rectangle(
                 image,
-                tuple(pt),
-                (pt[0] + w, pt[1] + _h),
+                pt,
+                (int(x + rw), int(y + rh)),
                 MARKER_RECTANGLE_COLOR,
                 DEFAULT_LINE_WIDTH,
             )
-            # display:
             image_eroded_sub = cv2.rectangle(
                 image_eroded_sub,
-                tuple(pt),
-                (pt[0] + w, pt[1] + _h),
+                pt,
+                (int(x + rw), int(y + rh)),
                 ERODE_RECT_COLOR if self.apply_erode_subtract else NORMAL_RECT_COLOR,
                 4,
             )
-            centres.append([pt[0] + w / 2, pt[1] + _h / 2])
-            sum_t += max_t
-
-        logger.info(quarter_match_log)
-        logger.info(f"Optimal Scale: {best_scale}")
-        # analysis data
-        self.threshold_circles.append(sum_t / 4)
 
         image = ImageUtils.four_point_transform(image, np.array(centres))
         # appendSaveImg(1,image_eroded_sub)

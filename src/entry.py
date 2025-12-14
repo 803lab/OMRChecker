@@ -38,7 +38,38 @@ def entry_point(input_dir, args):
     if not os.path.exists(input_dir):
         raise Exception(f"Given input directory does not exist: '{input_dir}'")
     curr_dir = input_dir
-    return process_dir(input_dir, curr_dir, args)
+
+    env_template_path = os.environ.get("OMR_TEMPLATE_PATH")
+    env_config_path = os.environ.get("OMR_CONFIG_PATH")
+    env_evaluation_path = os.environ.get("OMR_EVALUATION_PATH")
+
+    # Seed configs from environment if provided
+    tuning_config = CONFIG_DEFAULTS
+    template = None
+    evaluation_config = None
+
+    if env_config_path:
+        tuning_config = open_config_with_defaults(Path(env_config_path))
+
+    if env_template_path:
+        template = Template(Path(env_template_path), tuning_config)
+
+    if env_evaluation_path:
+        evaluation_config = EvaluationConfig(
+            Path(env_evaluation_path).parent,
+            Path(env_evaluation_path),
+            template,
+            tuning_config,
+        )
+
+    return process_dir(
+        input_dir,
+        curr_dir,
+        args,
+        template=template,
+        tuning_config=tuning_config,
+        evaluation_config=evaluation_config,
+    )
 
 
 def print_config_summary(

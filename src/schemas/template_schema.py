@@ -90,6 +90,11 @@ TEMPLATE_SCHEMA = {
                                     "additionalProperties": False,
                                     "properties": {
                                         "apply_erode_subtract": {"type": "boolean"},
+                                        "searchMode": {
+                                            "type": "string",
+                                            "enum": ["quadrants", "global", "auto", "fallback"],
+                                        },
+                                        "globalSearch": {"type": "boolean"},
                                         "marker_rescale_range": two_positive_numbers,
                                         "marker_rescale_steps": {"type": "number"},
                                         "max_matching_variation": {"type": "number"},
@@ -173,7 +178,11 @@ TEMPLATE_SCHEMA = {
                                     "type": "object",
                                     "additionalProperties": False,
                                     "properties": {
-                                        "morphKernel": two_positive_integers
+                                        "morphKernel": two_positive_integers,
+                                        "onFail": {
+                                            "type": "string",
+                                            "enum": ["error", "skip", "pass", "ignore"],
+                                        },
                                     },
                                 }
                             }

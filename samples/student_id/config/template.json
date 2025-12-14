@@ -1,0 +1,70 @@
+{
+  "pageDimensions": [
+    562,
+    472
+  ],
+  "preProcessors": [
+    {
+      "name": "CropPage",
+      "options": {
+        "morphKernel": [
+          10,
+          10
+        ],
+        "onFail": "skip"
+      }
+    },
+    {
+      "name": "CropOnMarkers",
+      "options": {
+        "relativePath": "omr_marker.jpg",
+        "sheetToMarkerWidthRatio": 31,
+        "searchMode": "global"
+      }
+    }
+  ],
+  "fieldBlocks": {
+    "StudentID": {
+      "fieldType": "QTYPE_INT",
+      "fieldLabels": [
+        "sid1",
+        "sid2",
+        "sid3",
+        "sid4",
+        "sid5",
+        "sid6",
+        "sid7",
+        "sid8",
+        "sid9",
+        "sid10"
+      ],
+      "origin": [
+        38,
+        40
+      ],
+      "labelsGap": 51.0,
+      "bubblesGap": 41.0
+    }
+  },
+  "customLabels": {
+    "StudentID": [
+      "sid1",
+      "sid2",
+      "sid3",
+      "sid4",
+      "sid5",
+      "sid6",
+      "sid7",
+      "sid8",
+      "sid9",
+      "sid10"
+    ]
+  },
+  "outputColumns": [
+    "StudentID"
+  ],
+  "bubbleDimensions": [
+    28,
+    28
+  ]
+}

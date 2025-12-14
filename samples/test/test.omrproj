@@ -1,0 +1,9 @@
+{
+  "name": "test",
+  "omrchecker_root": "C:\\Users\\13395\\Documents\\Code\\Project\\OMRChecker",
+  "template_path": "C:\\Users\\13395\\Documents\\Code\\Project\\OMRChecker\\samples\\test\\config\\template.json",
+  "config_path": "C:\\Users\\13395\\Documents\\Code\\Project\\OMRChecker\\samples\\test\\config\\config.json",
+  "evaluation_path": null,
+  "input_dir": "C:\\Users\\13395\\Documents\\Code\\Project\\OMRChecker\\samples\\test\\input",
+  "output_dir": "C:\\Users\\13395\\Documents\\Code\\Project\\OMRChecker\\samples\\test\\output"
+}
